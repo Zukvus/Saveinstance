@@ -1,0 +1,91 @@
+local HttpService = game:GetService('HttpService')
+local CoreGui = game:GetService('CoreGui')
+local RunService = game:GetService('RunService')
+
+local function decompileScript(script)
+    local success, bytecode = pcall(script.GetRawBytecode, script)
+    if not success then
+        warn('Failed to get bytecode:', bytecode)
+        return nil
+    end
+
+    local response = HttpService:PostAsync('https://unluau.lonegladiator.dev/unluau/decompile', 
+    HttpService:JSONEncode({
+        version = 5,
+        bytecode = HttpService:Base64Encode(bytecode)
+    }), Enum.HttpContentType.ApplicationJson)
+
+    if response and response.StatusCode == 200 then
+        local decoded = HttpService:JSONDecode(response.Body)
+        if decoded.status == 'ok' then
+            return decoded.output
+        else
+            warn('Decompilation failed:', decoded.status)
+        end
+    else
+        warn('Failed to get a valid response from decompiler.')
+    end
+    return nil
+end
+
+local function collectScripts(services)
+    local scripts = {}
+    for _, service in ipairs(services) do
+        for _, obj in ipairs(service:GetDescendants()) do
+            if obj:IsA('LocalScript') or obj:IsA('ModuleScript') or (obj:IsA('Script') and obj.RunContext == Enum.RunContext.Client) then
+                table.insert(scripts, obj)
+            end
+        end
+    end
+    return scripts
+end
+
+local function moveNilScriptsToFolder()
+    local NilFolder = Instance.new("Folder", game)
+    NilFolder.Name = "Nil Instances"
+    for _, obj in ipairs(game:GetDescendants()) do
+        if (obj:IsA('LocalScript') or obj:IsA('ModuleScript') or (obj:IsA('Script') and obj.RunContext == Enum.RunContext.Client)) and not obj.Parent then
+            obj.Parent = NilFolder
+        end
+    end
+end
+
+local function saveGameInstance()
+    local success, errorMessage = pcall(function()
+        game:Clone().Parent = nil
+        game:Destroy()
+    end)
+    if not success then
+        warn('Failed to save game instance:', errorMessage)
+    end
+end
+
+local servicesTable = {
+    game:GetService('Workspace'),
+    game:GetService('StarterPlayer'),
+    game:GetService('StarterGui'),
+    game:GetService('ReplicatedStorage'),
+    game:GetService('ReplicatedFirst'),
+    game:GetService('StarterPack')
+}
+
+local scripts = collectScripts(servicesTable)
+local total = #scripts
+local processed = 0
+
+local msg = Instance.new('Hint', CoreGui)
+msg.Text = 'Starting decompilation...'
+
+for _, script in ipairs(scripts) do
+    local success, source = pcall(decompileScript, script)
+    if success and source then
+        script.Source = source
+        processed = processed + 1
+    end
+    msg.Text = string.format('Decompiled %d of %d scripts', processed, total)
+end
+
+moveNilScriptsToFolder()
+saveGameInstance()
+
+msg.Text = 'All scripts decompiled and game instance saved.'
